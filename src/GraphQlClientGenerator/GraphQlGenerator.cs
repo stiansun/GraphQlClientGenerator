@@ -780,6 +780,10 @@ using Newtonsoft.Json.Linq;
         writer.Write(propertyTypeName);
         writer.Write(" ");
         writer.Write(propertyName);
+        if (Equals(baseType.Name, propertyName))
+        {
+            writer.Write("_");
+        }
 
         writeBody(new ScalarFieldTypeDescription { NetTypeName = propertyTypeName, FormatMask = propertyTypeDescription.FormatMask }, GetBackingFieldName(member.Name));
 
