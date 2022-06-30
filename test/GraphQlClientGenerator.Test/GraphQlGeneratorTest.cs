@@ -382,6 +382,7 @@ public class GraphQlGeneratorTest
             {
                 CSharpVersion = CSharpVersion.NewestWithNullableReferences,
                 JsonPropertyGeneration = JsonPropertyGenerationOption.UseDefaultAlias,
+                EnumValueNaming = EnumValueNamingOption.Original,
                 ScalarFieldTypeMappingProvider = TestFormatMaskScalarFieldTypeMappingProvider.Instance
             };
             
