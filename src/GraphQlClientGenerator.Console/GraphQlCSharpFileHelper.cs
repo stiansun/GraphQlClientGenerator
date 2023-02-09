@@ -53,8 +53,12 @@ internal static class GraphQlCSharpFileHelper
                 MemberAccessibility = options.MemberAccessibility,
                 IdTypeMapping = options.IdTypeMapping,
                 FloatTypeMapping = options.FloatTypeMapping,
+                IntegerTypeMapping = options.IntegerTypeMapping,
+                BooleanTypeMapping = options.BooleanTypeMapping,
                 JsonPropertyGeneration = options.JsonPropertyAttribute,
-                EnumValueNaming = options.EnumValueNaming
+                EnumValueNaming = options.EnumValueNaming,
+                IncludeDeprecatedFields = options.IncludeDeprecatedFields,
+                FileScopedNamespaces = options.FileScopedNamespaces
             };
 
         if (!KeyValueParameterParser.TryGetCustomClassMapping(options.ClassMapping, out var customMapping, out var customMappingParsingErrorMessage))
@@ -62,7 +66,12 @@ internal static class GraphQlCSharpFileHelper
 
         foreach (var kvp in customMapping)
             generatorConfiguration.CustomClassNameMapping.Add(kvp);
-            
+
+        if (!String.IsNullOrEmpty(options.RegexScalarFieldTypeMappingConfigurationFile))
+            generatorConfiguration.ScalarFieldTypeMappingProvider =
+                new RegexScalarFieldTypeMappingProvider(
+                    RegexScalarFieldTypeMappingProvider.ParseRulesFromJson(await File.ReadAllTextAsync(options.RegexScalarFieldTypeMappingConfigurationFile)));
+
         var generator = new GraphQlGenerator(generatorConfiguration);
 
         if (options.OutputType == OutputType.SingleFile)

@@ -17,10 +17,23 @@ internal static class Commands
                 "--classMapping",
                 "Format: {GraphQlTypeName}:{C#ClassName}; allows to define custom class names for specific GraphQL types; common reason for this is to avoid property of the same name as its parent class");
 
-        classMappingOption.AddValidator(option => option.ErrorMessage = KeyValueParameterParser.TryGetCustomClassMapping(option.Tokens.Select(t => t.Value), out _, out var errorMessage) ? null : errorMessage);
+        classMappingOption.AddValidator(
+            static option =>
+                option.ErrorMessage =
+                    KeyValueParameterParser.TryGetCustomClassMapping(option.Tokens.Select(t => t.Value), out _, out var errorMessage)
+                        ? null
+                        : errorMessage);
 
         var headerOption = new Option<string[]>("--header", "Format: {Header}:{Value}; allows to enter custom headers required to fetch GraphQL metadata");
-        headerOption.AddValidator(option => option.ErrorMessage = KeyValueParameterParser.TryGetCustomHeaders(option.Tokens.Select(t => t.Value), out _, out var errorMessage) ? null : errorMessage);
+        headerOption.AddValidator(
+            static option =>
+                option.ErrorMessage =
+                    KeyValueParameterParser.TryGetCustomHeaders(option.Tokens.Select(t => t.Value), out _, out var errorMessage)
+                        ? null
+                        : errorMessage);
+
+        var regexScalarFieldTypeMappingConfigurationOption =
+            new Option<string>("--regexScalarFieldTypeMappingConfigurationFile", $"File name specifying rules for \"{nameof(RegexScalarFieldTypeMappingProvider)}\"");
 
         var command =
             new RootCommand
@@ -38,18 +51,51 @@ internal static class Commands
                 new Option<OutputType>("--outputType", () => OutputType.SingleFile, "Specifies generated classes organization"),
                 new Option<bool>("--partialClasses", () => false, "Mark classes as \"partial\""),
                 classMappingOption,
-                new Option<IdTypeMapping>("--idTypeMapping", () => IdTypeMapping.Guid, "Specifies the .NET type generated for GraphQL ID data type"),
+                new Option<BooleanTypeMapping>("--booleanTypeMapping", () => BooleanTypeMapping.Boolean, "Specifies the .NET type generated for GraphQL Boolean data type"),
                 new Option<FloatTypeMapping>("--floatTypeMapping", () => FloatTypeMapping.Decimal, "Specifies the .NET type generated for GraphQL Float data type"),
+                new Option<IdTypeMapping>("--idTypeMapping", () => IdTypeMapping.Guid, "Specifies the .NET type generated for GraphQL ID data type"),
+                new Option<IntegerTypeMapping>("--integerTypeMapping", () => IntegerTypeMapping.Int32, "Specifies the .NET type generated for GraphQL Integer data type"),
                 new Option<JsonPropertyGenerationOption>("--jsonPropertyAttribute", () => JsonPropertyGenerationOption.CaseInsensitive, "Specifies the condition for using \"JsonPropertyAttribute\""),
-                new Option<EnumValueNamingOption>("--enumValueNaming", "Use \"Original\" to avoid pretty C# name conversion for maximum deserialization compatibility")
+                new Option<EnumValueNamingOption>("--enumValueNaming", () => EnumValueNamingOption.CSharp, "Use \"Original\" to avoid pretty C# name conversion for maximum deserialization compatibility"),
+                new Option<bool>("--includeDeprecatedFields", () => false, "Includes deprecated fields in generated query builders and data classes"),
+                new Option<bool>("--fileScopedNamespaces", () => false, "Specifies if file-scoped namespaces should be used in generated files (C# 10+)"),
+                regexScalarFieldTypeMappingConfigurationOption
             };
 
         command.TreatUnmatchedTokensAsErrors = true;
         command.Name = "GraphQlClientGenerator.Console";
-        command.Description = "A tool for generating strongly typed GraphQL query builders and data classes";
+        command.Description = "A tool for generating C# GraphQL query builders and data classes";
         command.Handler = CommandHandler.Create<IConsole, ProgramOptions>(GraphQlCSharpFileHelper.GenerateGraphQlClientSourceCode);
-        command.AddValidator(option => option.ErrorMessage = option.FindResultFor(serviceUrlOption) is not null && option.FindResultFor(schemaFileOption) is not null ? "\"serviceUrl\" and \"schemaFileName\" parameters are mutually exclusive. " : null);
-        command.AddValidator(option => option.ErrorMessage = option.FindResultFor(serviceUrlOption) is null && option.FindResultFor(schemaFileOption) is null ? "Either \"serviceUrl\" or \"schemaFileName\" parameter must be specified. " : null);
+        command.AddValidator(
+            option =>
+                option.ErrorMessage =
+                    option.FindResultFor(serviceUrlOption) is not null && option.FindResultFor(schemaFileOption) is not null
+                        ? "\"serviceUrl\" and \"schemaFileName\" parameters are mutually exclusive. "
+                        : null);
+
+        command.AddValidator(
+            option =>
+                option.ErrorMessage =
+                    option.FindResultFor(serviceUrlOption) is null && option.FindResultFor(schemaFileOption) is null
+                        ? "Either \"serviceUrl\" or \"schemaFileName\" parameter must be specified. "
+                        : null);
+
+        command.AddValidator(
+            option =>
+            {
+                var result = option.FindResultFor(regexScalarFieldTypeMappingConfigurationOption);
+                if (result is null)
+                    return;
+
+                try
+                {
+                    RegexScalarFieldTypeMappingProvider.ParseRulesFromJson(File.ReadAllText(result.GetValueOrDefault<string>()));
+                }
+                catch (Exception exception)
+                {
+                    option.ErrorMessage = exception.Message;
+                }
+            });
 
         return command;
     }

@@ -14,7 +14,7 @@ public class GraphQlGenerator
     public const string PreprocessorDirectiveDisableNewtonsoftJson = "GRAPHQL_GENERATOR_DISABLE_NEWTONSOFT_JSON";
 
     public const string RequiredNamespaces =
-        @"using System;
+        $@"using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -24,7 +24,7 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Text.RegularExpressions;
-#if !" + PreprocessorDirectiveDisableNewtonsoftJson + @"
+#if !{PreprocessorDirectiveDisableNewtonsoftJson}
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 #endif
@@ -32,12 +32,12 @@ using Newtonsoft.Json.Linq;
 
     private delegate void WriteDataClassPropertyBodyDelegate(ScalarFieldTypeDescription netType, string backingFieldName);
 
-    private static readonly HttpClient HttpClient =
-        new()
+    private static HttpClient CreateHttpClient(HttpMessageHandler messageHandler = null) =>
+        new(messageHandler ?? new HttpClientHandler())
         {
             DefaultRequestHeaders =
             {
-                UserAgent = { ProductInfoHeaderValue.Parse("GraphQlClientGenerator/" + typeof(GraphQlGenerator).GetTypeInfo().Assembly.GetName().Version) }
+                UserAgent = { ProductInfoHeaderValue.Parse($"GraphQlClientGenerator/{typeof(GraphQlGenerator).GetTypeInfo().Assembly.GetName().Version}") }
             }
         };
 
@@ -53,11 +53,11 @@ using Newtonsoft.Json.Linq;
     public GraphQlGenerator(GraphQlGeneratorConfiguration configuration = null) =>
         _configuration = configuration ?? new GraphQlGeneratorConfiguration();
 
-    public static async Task<GraphQlSchema> RetrieveSchema(HttpMethod method, string url, IEnumerable<KeyValuePair<string, string>> headers = null)
+    public static async Task<GraphQlSchema> RetrieveSchema(HttpMethod method, string url, IEnumerable<KeyValuePair<string, string>> headers = null, HttpMessageHandler messageHandler = null)
     {
         StringContent requestContent = null;
         if (method == HttpMethod.Get)
-            url += "?&query=" + IntrospectionQuery.Text;
+            url += $"?&query={IntrospectionQuery.Text}";
         else
             requestContent = new StringContent(JsonConvert.SerializeObject(new { query = IntrospectionQuery.Text }), Encoding.UTF8, "application/json");
 
@@ -67,7 +67,8 @@ using Newtonsoft.Json.Linq;
             foreach (var kvp in headers)
                 request.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value);
 
-        using var response = await HttpClient.SendAsync(request);
+        using var httpClient = CreateHttpClient(messageHandler);
+        using var response = await httpClient.SendAsync(request);
 
         var content =
             response.Content is null
@@ -119,12 +120,22 @@ using Newtonsoft.Json.Linq;
         writer.WriteLine();
         writer.WriteLine(RequiredNamespaces);
         writer.Write("namespace ");
-        writer.WriteLine(@namespace);
-        writer.WriteLine("{");
+        writer.Write(@namespace);
 
-        Generate(new SingleFileGenerationContext(schema, writer, indentationSize: 4));
+        if (_configuration.FileScopedNamespaces)
+        {
+            writer.WriteLine(";");
+            writer.WriteLine();
+            Generate(new SingleFileGenerationContext(schema, writer, indentationSize: 0));
+        }
+        else
+        {
+            writer.WriteLine();
+            writer.WriteLine("{");
+            Generate(new SingleFileGenerationContext(schema, writer, indentationSize: 4));
+            writer.WriteLine("}");
+        }
 
-        writer.WriteLine("}");
         writer.Flush();
     }
 
@@ -789,9 +800,7 @@ using Newtonsoft.Json.Linq;
 
         if (isDeprecated)
         {
-            deprecationReason = String.IsNullOrWhiteSpace(deprecationReason) ? null : $"(@\"{deprecationReason.Replace("\"", "\"\"")}\")";
-            writer.Write(indentation);
-            writer.WriteLine($"    [Obsolete{deprecationReason}]");
+            WriteObsoleteAttribute(writer, deprecationReason, indentation);
         }
 
         if (decorateWithJsonPropertyAttribute)
@@ -975,6 +984,10 @@ using Newtonsoft.Json.Linq;
         var typeName = GetCSharpMemberName(type.Name);
         var className = $"{_configuration.ClassPrefix}{typeName}QueryBuilder{_configuration.ClassSuffix}";
 
+        var fields = type.Kind == GraphQlTypeKind.Union ? null : GetFieldsToGenerate(type, complexTypes);
+        if (fields?.Count == 0)
+            return;
+
         ValidateClassName(className);
 
         context.BeforeQueryBuilderGeneration(className);
@@ -996,7 +1009,6 @@ using Newtonsoft.Json.Linq;
         writer.Write(indentation);
         writer.Write("    private static readonly GraphQlFieldMetadata[] AllFieldMetadata =");
 
-        var fields = type.Kind == GraphQlTypeKind.Union ? null : GetFieldsToGenerate(type, complexTypes);
         if (fields is null)
         {
             writer.WriteLine(" new GraphQlFieldMetadata[0];");
@@ -1012,7 +1024,7 @@ using Newtonsoft.Json.Linq;
             {
                 writer.Write(indentation);
                 writer.WriteLine("        new []");
-                fieldMetadataIndentation = indentation + "    ";
+                fieldMetadataIndentation = $"{indentation}    ";
             }
 
             writer.Write(fieldMetadataIndentation);
@@ -1174,6 +1186,11 @@ using Newtonsoft.Json.Linq;
                     writer.Write("null");
             }
 
+            if (field.IsDeprecated)
+            {
+                WriteObsoleteAttribute(writer, field.DeprecationReason, indentation);
+            }
+
             if (fieldType.Kind is GraphQlTypeKind.Scalar or GraphQlTypeKind.Enum or GraphQlTypeKind.List)
             {
                 writer.Write(indentation);
@@ -1304,6 +1321,13 @@ using Newtonsoft.Json.Linq;
         context.AfterQueryBuilderGeneration(className);
     }
 
+    private void WriteObsoleteAttribute(TextWriter writer, string deprecationReason, string indentation)
+    {
+        deprecationReason = String.IsNullOrWhiteSpace(deprecationReason) ? null : $"(@\"{deprecationReason.Replace("\"", "\"\"")}\")";
+        writer.Write(indentation);
+        writer.WriteLine($"    [Obsolete{deprecationReason}]");
+    }
+
     private IList<QueryBuilderParameterDefinition> ResolveParameterDefinitions(GenerationContext context, GraphQlType type, IEnumerable<GraphQlArgument> graphQlArguments)
     {
         if (graphQlArguments is null)
@@ -1415,7 +1439,7 @@ using Newtonsoft.Json.Linq;
 
         return
             directiveParameterNames.Any()
-                ? "new " + AddQuestionMarkIfNullableReferencesEnabled("GraphQlDirective") + "[] { " + String.Join(", ", directiveParameterNames) + " }"
+                ? $"new {AddQuestionMarkIfNullableReferencesEnabled("GraphQlDirective")}[] {{ {String.Join(", ", directiveParameterNames)} }}"
                 : "null";
     }
 
@@ -1522,7 +1546,7 @@ using Newtonsoft.Json.Linq;
     private static void ValidateClassName(string className)
     {
         if (!CSharpHelper.IsValidIdentifier(className))
-            throw new InvalidOperationException($"Resulting class name '{className}' is not valid. ");
+            throw new InvalidOperationException($"Resulting class name \"{className}\" is not valid. ");
     }
 
     private static void AppendArgumentDictionary(string indentation, TextWriter writer, ICollection<QueryBuilderParameterDefinition> argumentDefinitions, string argumentCollectionVariableName)
@@ -1686,7 +1710,7 @@ using Newtonsoft.Json.Linq;
             writer.Write("        AddArgument(\"");
             writer.Write(definition.Argument.Name);
             writer.Write("\", ");
-            writer.Write(NamingHelper.ToValidCSharpName(definition.Argument.Name));
+            writer.Write(definition.NetParameterName);
             writer.WriteLine(");");
         }
 

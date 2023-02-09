@@ -1,10 +1,17 @@
-﻿using System.Text.RegularExpressions;
+﻿using Newtonsoft.Json;
+using System.Text.RegularExpressions;
 
 namespace GraphQlClientGenerator;
 
-internal class RegexScalarFieldTypeMappingProvider : IScalarFieldTypeMappingProvider
+public class RegexScalarFieldTypeMappingProvider : IScalarFieldTypeMappingProvider
 {
     private readonly ICollection<RegexScalarFieldTypeMappingRule> _rules;
+
+    public static ICollection<RegexScalarFieldTypeMappingRule> ParseRulesFromJson(string json)
+    {
+        var rules = JsonConvert.DeserializeObject<ICollection<RegexScalarFieldTypeMappingRule>>(json);
+        return rules ?? Array.Empty<RegexScalarFieldTypeMappingRule>();
+    }
 
     public RegexScalarFieldTypeMappingProvider(ICollection<RegexScalarFieldTypeMappingRule> rules) =>
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
@@ -14,7 +21,9 @@ internal class RegexScalarFieldTypeMappingProvider : IScalarFieldTypeMappingProv
         valueType = (valueType as GraphQlFieldType)?.UnwrapIfNonNull() ?? valueType;
 
         foreach (var rule in _rules)
-            if (Regex.IsMatch(valueName, rule.PatternValueName) && Regex.IsMatch(baseType.Name, rule.PatternBaseType) && Regex.IsMatch(valueType.Name ?? String.Empty, rule.PatternValueType))
+            if (Regex.IsMatch(valueName, rule.PatternValueName) &&
+                Regex.IsMatch(baseType.Name, rule.PatternBaseType) &&
+                Regex.IsMatch(valueType.Name ?? String.Empty, rule.PatternValueType))
                 return new ScalarFieldTypeDescription { NetTypeName = rule.NetTypeName, FormatMask = rule.FormatMask };
 
         return DefaultScalarFieldTypeMappingProvider.GetFallbackFieldType(configuration, valueType);
